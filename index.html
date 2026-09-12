@@ -275,7 +275,7 @@
       color: var(--muted);
       text-align: center;
     }
-    
+
     .chk-label {
       display: flex;
       align-items: center;
@@ -389,7 +389,7 @@
           <button type="submit" class="btn">Salvar Jogo</button>
         </form>
       </div>
-      
+
       <div class="toolbar">
         <div>
           <label for="p-filtro-mes">Mês de Referência (Histórico e Relatório)</label>
@@ -403,7 +403,7 @@
         <textarea id="p-relatorio-texto" rows="8" readonly style="font-family: monospace; font-size: 0.85rem; background: var(--surface2); color: var(--text); margin-bottom: 0.5rem;"></textarea>
         <button type="button" class="btn" id="btn-copiar-relatorio" style="width: 100%;">Copiar Relatório</button>
       </div>
-      
+
       <div class="card">
         <h2>Histórico do Mês</h2>
         <div id="lista-presencas"></div>
@@ -563,6 +563,7 @@
     const STORAGE_KEY = "controle-mensal-time-v1";
     // Valores Fixos da Lógica de Negócio para o Relatório
     const VALOR_PADRAO_MENSAL = 60.00;
+    const PIX_CHAVE = "jpinhelli@gmail.com";
 
     const DEFAULT_WHATSAPP_TEMPLATE =
       "Pessoal, boa!\n\nLembrete do *mensal* de *{mes}* ({mes_curto}).\n\n{extra}\n\nQuem já pagou, desconsidera. Valeu!";
@@ -646,7 +647,7 @@
           const parsed = JSON.parse(String(reader.result));
           const next = defaultState();
           Object.assign(next, parsed); // Simples merge
-          
+
           if (!confirm("Substituir TODOS os dados neste aparelho pelos deste arquivo?")) return;
           state = next;
           saveState();
@@ -723,7 +724,7 @@
         container.innerHTML = '<span class="empty" style="font-size:0.85rem">Cadastre jogadores primeiro.</span>';
         return;
       }
-      
+
       const sorted = state.players.slice().sort((a,b) => a.nome.localeCompare(b.nome, "pt-BR"));
       container.innerHTML = sorted.map(p => {
          const isAvulso = p.tipo === 'avulso';
@@ -733,7 +734,7 @@
             <span>${escapeHtml(p.nome)}${badge}</span>
          </label>`;
       }).join('');
-      
+
       container.querySelectorAll('.chk-jogador').forEach(chk => {
         chk.addEventListener('change', updatePresencaSummary);
       });
@@ -760,18 +761,18 @@
       const date = document.getElementById("p-data").value;
       const valAvulso = parseFloat(document.getElementById("p-valor-avulso").value) || 20; // Default fallback 20
       const checks = document.querySelectorAll('.chk-jogador:checked');
-      
+
       const presentPlayers = Array.from(checks).map(c => ({
          id: c.value,
          nome: c.dataset.nome,
          tipo: c.dataset.tipo
       }));
-      
+
       if(!date || presentPlayers.length === 0) {
         alert("Selecione a data e marque pelo menos um jogador presente.");
         return;
       }
-      
+
       state.attendances.push({
          id: uid(),
          date: date,
@@ -779,7 +780,7 @@
          presentPlayers: presentPlayers
       });
       saveState();
-      
+
       document.getElementById("form-presenca").reset();
       document.getElementById("p-data").value = todayISODate();
       document.getElementById("p-valor-avulso").value = "20.00"; // Reset pra 20
@@ -791,7 +792,7 @@
     document.getElementById("p-filtro-mes").addEventListener("change", renderPresencas);
 
     // FUNÇÃO DO RELATÓRIO DO WHATSAPP
-    function atualizarRelatorioCobranca(filteredGames) {
+    function atualizarRelatorioCobranca(filteredGames, monthKey) {
       const textArea = document.getElementById("p-relatorio-texto");
       if (!filteredGames || filteredGames.length === 0) {
         textArea.value = "Nenhum jogo registrado neste mês para gerar relatório.";
@@ -799,6 +800,7 @@
       }
 
       let avulsosData = {}; // id -> { qtd, total }
+      let avulsoValorPadrao = filteredGames[0].avulsoValue || 20;
       filteredGames.forEach(jogo => {
          const valorDoDia = jogo.avulsoValue || 20;
          jogo.presentPlayers.forEach(p => {
@@ -810,31 +812,30 @@
          });
       });
 
-      let txtMensal = "*Mensal (R$ 60,00)*\n";
-      // Listamos TODOS os mensais cadastrados no sistema (assumindo que o mensal é cobrado independentemente de jogar ou não).
-      const mensais = state.players.filter(p => p.tipo === 'mensal').sort((a,b) => a.nome.localeCompare(b.nome));
+      const mesTexto = formatMonthLong(monthKey);
+      let txt = `Lista ${mesTexto}\nPix: ${PIX_CHAVE}\n\n`;
+
+      txt += `*Mensal (R$ ${VALOR_PADRAO_MENSAL.toFixed(0)})*\n\n`;
+      const mensais = state.players.filter(p => p.tipo === 'mensal').sort((a,b) => a.nome.localeCompare(b.nome, "pt-BR"));
       mensais.forEach(m => {
-        const tel = m.telefone ? ` - ${m.telefone}` : "";
-        txtMensal += `${m.nome}${tel}\n`;
+        txt += `${m.nome} -\n`;
       });
 
-      let txtAvulso = "\n*Avulso*\n";
-      // Listamos apenas os avulsos que jogaram neste mês.
-      const avulsosQueJogaram = state.players.filter(p => p.tipo === 'avulso' && avulsosData[p.id]).sort((a,b) => a.nome.localeCompare(b.nome));
-      
+      txt += `\n*Avulso (R$${avulsoValorPadrao.toFixed(0)}/Jogo)*\n\n`;
+      const avulsosQueJogaram = state.players.filter(p => p.tipo === 'avulso' && avulsosData[p.id]).sort((a,b) => a.nome.localeCompare(b.nome, "pt-BR"));
+
       if(avulsosQueJogaram.length === 0) {
-         txtAvulso += "(Nenhum avulso jogou neste mês)\n";
+         txt += "(Nenhum avulso jogou neste mês)\n";
       } else {
          avulsosQueJogaram.forEach(a => {
-            const tel = a.telefone ? ` - ${a.telefone}` : "";
             const dados = avulsosData[a.id];
-            const txtJogos = dados.qtd === 1 ? "1 JOGO" : `${dados.qtd} JOGOS`;
+            const txtJogos = dados.qtd === 1 ? "1 jogo" : `${dados.qtd} jogos`;
             const valorFormat = `R$${dados.total.toFixed(2).replace('.', ',')}`;
-            txtAvulso += `${a.nome} - ${valorFormat} (${txtJogos})${tel}\n`;
+            txt += `${a.nome} - (${valorFormat} - ${txtJogos})\n`;
          });
       }
 
-      textArea.value = `${txtMensal}${txtAvulso}`;
+      textArea.value = txt;
     }
 
     document.getElementById("btn-copiar-relatorio").addEventListener("click", async () => {
@@ -851,22 +852,22 @@
        const el = document.getElementById("lista-presencas");
        if(!el) return;
        const monthKey = document.getElementById("p-filtro-mes").value || currentMonthKey();
-       
+
        const filtered = state.attendances.filter(a => monthKeyFromDate(a.date) === monthKey)
           .sort((a,b) => b.date.localeCompare(a.date));
-          
+
        // Atualiza o Relatório baseando-se nos jogos filtrados
-       atualizarRelatorioCobranca(filtered);
-          
+       atualizarRelatorioCobranca(filtered, monthKey);
+
        if(!filtered.length) {
           el.innerHTML = '<p class="empty">Nenhum jogo registrado neste mês.</p>';
           return;
        }
-       
+
        el.innerHTML = filtered.map(game => {
           const mensaisList = game.presentPlayers.filter(p => p.tipo === 'mensal').map(p => p.nome);
           const avulsosList = game.presentPlayers.filter(p => p.tipo === 'avulso').map(p => p.nome);
-          
+
           let listagemHTML = '';
           if(mensaisList.length > 0) {
              listagemHTML += `<div style="margin-bottom: 0.2rem;"><strong style="color:var(--muted)">Mensais:</strong> ${mensaisList.join(', ')}</div>`;
@@ -875,7 +876,7 @@
              const txValor = game.avulsoValue > 0 ? ` (R$ ${game.avulsoValue.toFixed(2).replace('.',',')}/cada)` : '';
              listagemHTML += `<div style="color: var(--warning)"><strong style="color:var(--warning)">Avulsos${txValor}:</strong> ${avulsosList.join(', ')}</div>`;
           }
-              
+
           return `<div style="border-bottom: 1px solid var(--border); padding: 0.85rem 0;">
              <div style="display:flex; justify-content: space-between; align-items:center; margin-bottom: 0.5rem;">
                 <strong style="font-size:0.95rem;">Jogo dia ${fmtDateBR(game.date)}</strong>
@@ -886,7 +887,7 @@
              </div>
           </div>`;
        }).join('');
-       
+
        el.querySelectorAll('[data-del-pres]').forEach(b => {
           b.addEventListener('click', () => {
              if(!confirm("Excluir a lista de presenças deste jogo?")) return;
@@ -930,7 +931,7 @@
               ? `<button type="button" class="btn small secondary" data-act="mensal" data-id="${p.id}">Registrar mensal</button>` : "";
           const btnAvulso = p.tipo === "avulso"
               ? `<button type="button" class="btn small secondary" data-act="avulso" data-id="${p.id}">Registrar jogo</button>` : "";
-          
+
           return `<tr>
             <td><strong>${escapeHtml(p.nome)}</strong><br/><span style="color:var(--muted);font-size:0.85rem;">${escapeHtml(p.telefone || "—")}</span></td>
             <td>${badge}</td>
@@ -939,7 +940,7 @@
         })
         .join("");
       el.innerHTML = `<table><thead><tr><th>Jogador</th><th>Tipo</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
-      
+
       el.querySelectorAll("button[data-act]").forEach((b) => {
         b.addEventListener("click", () => {
           const id = b.dataset.id;
@@ -987,7 +988,7 @@
       document.getElementById("mp-tipo").value = tipo;
       document.getElementById("mp-data").value = todayISODate();
       document.getElementById("mp-obs").value = "";
-      
+
       // Auto-preencher valores sugeridos
       if(tipo === "mensal") {
          document.getElementById("mp-valor").value = VALOR_PADRAO_MENSAL;
@@ -1018,7 +1019,7 @@
       const valor = parseFloat(document.getElementById("mp-valor").value, 10);
       const obs = document.getElementById("mp-obs").value.trim();
       if (!data || !(valor >= 0)) return;
-      
+
       if (tipo === "mensal") {
         const refMonth = document.getElementById("mp-mes-ref").value || data.slice(0, 7);
         const dup = state.monthlyPayments.some((x) => x.playerId === playerId && x.refMonth === refMonth);
@@ -1075,7 +1076,7 @@
        const el = document.getElementById(id);
        if(el) el.addEventListener("input", renderWhatsappPreview);
     });
-    
+
     document.getElementById("wa-save-template").addEventListener("click", () => {
       state.whatsappReminder = { template: document.getElementById("wa-template").value };
       saveState();
@@ -1185,14 +1186,14 @@
       const movs = movementsForMonth(monthKey);
       let entradas = 0, saidas = 0;
       movs.forEach((m) => { m.kind === "in" ? (entradas += m.amount) : (saidas += m.amount); });
-      
+
       document.getElementById("fluxo-entradas").textContent = formatBRL(entradas);
       document.getElementById("fluxo-saidas").textContent = formatBRL(saidas);
       document.getElementById("fluxo-saldo").textContent = formatBRL(entradas - saidas);
 
       const el = document.getElementById("lista-fluxo");
       if (!movs.length) { el.innerHTML = '<p class="empty">Nenhuma movimentação neste mês.</p>'; return; }
-      
+
       el.innerHTML = `<table><thead><tr><th>Data</th><th>Tipo</th><th>Detalhe</th><th>Valor</th><th></th></tr></thead><tbody>${movs
         .map((m) => {
           const dt = m.type === "monthly" ? state.monthlyPayments.find(x => x.id === m.id).paidDate
