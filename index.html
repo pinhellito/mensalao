@@ -275,6 +275,30 @@
       color: var(--muted);
       text-align: center;
     }
+    
+    /* Estilos novos para os checkboxes de presença */
+    .chk-label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.88rem;
+      color: var(--text);
+      margin: 0;
+      padding: 0.4rem 0;
+      cursor: pointer;
+      user-select: none;
+    }
+    .chk-label input {
+      width: auto;
+      margin: 0;
+      cursor: pointer;
+      width: 18px;
+      height: 18px;
+    }
+    .chk-label:hover {
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: 6px;
+    }
   </style>
 </head>
 <body>
@@ -316,6 +340,7 @@
 
     <nav class="tabs" role="tablist">
       <button type="button" class="active" data-tab="jogadores">Jogadores</button>
+      <button type="button" data-tab="presencas">Presenças</button>
       <button type="button" data-tab="goleiros">Goleiros de aluguel</button>
       <button type="button" data-tab="quadra">Quadra</button>
       <button type="button" data-tab="fluxo">Fluxo de caixa</button>
@@ -348,6 +373,46 @@
       <div class="card">
         <h2>Jogadores cadastrados</h2>
         <div id="lista-jogadores"></div>
+      </div>
+    </section>
+
+    <!-- Presenças (NOVA ABA) -->
+    <section id="panel-presencas" class="panel" role="tabpanel">
+      <div class="card">
+        <h2>Registrar Jogo</h2>
+        <p class="hint">Marque quem compareceu no dia. O sistema separará automaticamente quem é mensal e quem é avulso.</p>
+        <form id="form-presenca">
+          <div class="row">
+            <div>
+              <label for="p-data">Data do Jogo</label>
+              <input id="p-data" type="date" required />
+            </div>
+            <div>
+              <label for="p-valor-avulso">Valor Avulso (R$)</label>
+              <input id="p-valor-avulso" type="number" step="0.01" min="0" placeholder="Ex: 25,00" />
+            </div>
+          </div>
+          <label>Jogadores presentes</label>
+          <div id="p-lista-checkboxes" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap:0.2rem; margin-bottom: 0.75rem; max-height: 250px; overflow-y: auto; background: var(--bg); padding: 0.75rem; border-radius: 8px; border: 1px solid var(--border);">
+            <!-- Checkboxes populados via JS -->
+          </div>
+          <div id="p-resumo" style="font-size: 0.85rem; color: var(--warning); margin-bottom: 1rem; font-weight: 600;">
+            Avulsos marcados: 0
+          </div>
+          <button type="submit" class="btn">Salvar Jogo</button>
+        </form>
+      </div>
+      
+      <div class="toolbar">
+        <div>
+          <label for="p-filtro-mes">Filtrar Histórico por Mês</label>
+          <input id="p-filtro-mes" type="month" />
+        </div>
+      </div>
+      
+      <div class="card">
+        <h2>Histórico do Mês</h2>
+        <div id="lista-presencas"></div>
       </div>
     </section>
 
@@ -477,7 +542,7 @@
     </footer>
   </div>
 
-  <!-- Modal pagamento jogador (div — melhor no iOS que <dialog>) -->
+  <!-- Modal pagamento jogador -->
   <div id="modal-pagamento" class="modal-root" aria-hidden="true">
     <div class="modal-backdrop" id="modal-pagamento-backdrop"></div>
     <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="modal-pag-titulo">
@@ -525,6 +590,7 @@
           avulsoPayments: Array.isArray(s.avulsoPayments) ? s.avulsoPayments : [],
           goalkeeperHires: Array.isArray(s.goalkeeperHires) ? s.goalkeeperHires : [],
           courtPayments: Array.isArray(s.courtPayments) ? s.courtPayments : [],
+          attendances: Array.isArray(s.attendances) ? s.attendances : [],
           whatsappReminder:
             s.whatsappReminder && typeof s.whatsappReminder.template === "string"
               ? { template: s.whatsappReminder.template }
@@ -542,6 +608,7 @@
         avulsoPayments: [],
         goalkeeperHires: [],
         courtPayments: [],
+        attendances: [],
         whatsappReminder: { template: DEFAULT_WHATSAPP_TEMPLATE },
       };
     }
@@ -561,6 +628,7 @@
         avulsoPayments: Array.isArray(raw.avulsoPayments) ? raw.avulsoPayments : [],
         goalkeeperHires: Array.isArray(raw.goalkeeperHires) ? raw.goalkeeperHires : [],
         courtPayments: Array.isArray(raw.courtPayments) ? raw.courtPayments : [],
+        attendances: Array.isArray(raw.attendances) ? raw.attendances : [],
         whatsappReminder:
           raw.whatsappReminder && typeof raw.whatsappReminder.template === "string"
             ? { template: raw.whatsappReminder.template }
@@ -570,6 +638,8 @@
 
     function refreshAll() {
       renderJogadores();
+      renderPresencaCheckboxes();
+      renderPresencas();
       renderGoleiros();
       renderQuadra();
       renderFluxo();
@@ -604,7 +674,8 @@
             !next.monthlyPayments.length &&
             !next.avulsoPayments.length &&
             !next.goalkeeperHires.length &&
-            !next.courtPayments.length
+            !next.courtPayments.length &&
+            !next.attendances.length
           ) {
             if (!confirm("O arquivo parece vazio. Mesmo assim substituir os dados deste aparelho?")) return;
           } else {
@@ -740,11 +811,146 @@
     });
 
     // Forms default dates
+    document.getElementById("p-data").value = todayISODate();
+    document.getElementById("p-filtro-mes").value = currentMonthKey();
     document.getElementById("g-data").value = todayISODate();
     document.getElementById("q-mes").value = currentMonthKey();
     document.getElementById("q-data").value = todayISODate();
     document.getElementById("fluxo-mes").value = currentMonthKey();
 
+    // ------------------------------------
+    // LÓGICA DE PRESENÇAS
+    // ------------------------------------
+    function renderPresencaCheckboxes() {
+      const container = document.getElementById("p-lista-checkboxes");
+      if (!container) return;
+      if (!state.players.length) {
+        container.innerHTML = '<span class="empty" style="font-size:0.85rem">Cadastre jogadores primeiro.</span>';
+        return;
+      }
+      
+      const sorted = state.players.slice().sort((a,b) => a.nome.localeCompare(b.nome, "pt-BR"));
+      container.innerHTML = sorted.map(p => {
+         const isAvulso = p.tipo === 'avulso';
+         const badge = isAvulso ? ' <span class="badge avulso" style="font-size:0.6rem; margin-left:4px;">Avulso</span>' : '';
+         return `<label class="chk-label">
+            <input type="checkbox" value="${p.id}" data-nome="${escapeHtml(p.nome)}" data-tipo="${p.tipo}" class="chk-jogador" />
+            <span>${escapeHtml(p.nome)}${badge}</span>
+         </label>`;
+      }).join('');
+      
+      container.querySelectorAll('.chk-jogador').forEach(chk => {
+        chk.addEventListener('change', updatePresencaSummary);
+      });
+      updatePresencaSummary();
+    }
+
+    function updatePresencaSummary() {
+       const checks = document.querySelectorAll('.chk-jogador:checked');
+       let avulsos = 0;
+       checks.forEach(c => {
+          if(c.dataset.tipo === 'avulso') avulsos++;
+       });
+       const valInput = document.getElementById("p-valor-avulso").value;
+       let valText = "";
+       if (valInput && !isNaN(valInput)) {
+          valText = ` (Total a cobrar: ${formatBRL(avulsos * parseFloat(valInput))})`;
+       }
+       document.getElementById("p-resumo").textContent = `Avulsos marcados: ${avulsos}${valText}`;
+    }
+    document.getElementById("p-valor-avulso").addEventListener("input", updatePresencaSummary);
+
+    document.getElementById("form-presenca").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const date = document.getElementById("p-data").value;
+      const valAvulso = parseFloat(document.getElementById("p-valor-avulso").value) || 0;
+      const checks = document.querySelectorAll('.chk-jogador:checked');
+      
+      // Salva uma cópia exata do jogador naquele dia para o histórico não quebrar se o cara virar mensal depois
+      const presentPlayers = Array.from(checks).map(c => ({
+         id: c.value,
+         nome: c.dataset.nome,
+         tipo: c.dataset.tipo
+      }));
+      
+      if(!date || presentPlayers.length === 0) {
+        alert("Selecione a data e marque pelo menos um jogador presente.");
+        return;
+      }
+      
+      state.attendances.push({
+         id: uid(),
+         date: date,
+         avulsoValue: valAvulso,
+         presentPlayers: presentPlayers
+      });
+      saveState();
+      
+      document.getElementById("form-presenca").reset();
+      document.getElementById("p-data").value = todayISODate();
+      document.querySelectorAll('.chk-jogador').forEach(c => c.checked = false);
+      updatePresencaSummary();
+      renderPresencas();
+    });
+
+    document.getElementById("p-filtro-mes").addEventListener("change", renderPresencas);
+
+    function renderPresencas() {
+       const el = document.getElementById("lista-presencas");
+       if(!el) return;
+       const monthKey = document.getElementById("p-filtro-mes").value || currentMonthKey();
+       
+       const filtered = state.attendances.filter(a => monthKeyFromDate(a.date) === monthKey)
+          .sort((a,b) => b.date.localeCompare(a.date));
+          
+       if(!filtered.length) {
+          el.innerHTML = '<p class="empty">Nenhum jogo registrado neste mês.</p>';
+          return;
+       }
+       
+       el.innerHTML = filtered.map(game => {
+          let avulsoCount = 0;
+          const names = (game.presentPlayers || []).map(p => {
+             if (p && p.tipo) {
+                if (p.tipo === 'avulso') avulsoCount++;
+                return p.nome;
+             }
+             return 'Desconhecido';
+          });
+          
+          const totalText = game.avulsoValue > 0 && avulsoCount > 0 
+              ? ` — a cobrar: ${formatBRL(game.avulsoValue * avulsoCount)}` 
+              : '';
+              
+          return `<div style="border-bottom: 1px solid var(--border); padding: 0.85rem 0;">
+             <div style="display:flex; justify-content: space-between; align-items:center; margin-bottom: 0.5rem;">
+                <strong style="font-size:0.95rem;">Jogo dia ${fmtDateBR(game.date)}</strong>
+                <button type="button" class="btn small danger" data-del-pres="${game.id}">Excluir</button>
+             </div>
+             <div style="font-size: 0.85rem; color: var(--muted); margin-bottom: 0.4rem;">
+                <strong>${game.presentPlayers.length}</strong> presentes 
+                (<span style="color: var(--warning)">${avulsoCount} avulsos${totalText}</span>)
+             </div>
+             <div style="font-size: 0.82rem; color: var(--text); line-height:1.5;">
+                ${names.join(', ')}
+             </div>
+          </div>`;
+       }).join('');
+       
+       el.querySelectorAll('[data-del-pres]').forEach(b => {
+          b.addEventListener('click', () => {
+             if(!confirm("Excluir a lista de presenças deste jogo?")) return;
+             const id = b.getAttribute('data-del-pres');
+             state.attendances = state.attendances.filter(x => x.id !== id);
+             saveState();
+             renderPresencas();
+          });
+       });
+    }
+
+    // ------------------------------------
+    // LÓGICA EXISTENTE DE JOGADORES E FLUXO
+    // ------------------------------------
     document.getElementById("form-jogador").addEventListener("submit", (e) => {
       e.preventDefault();
       const nome = document.getElementById("j-nome").value.trim();
@@ -755,6 +961,7 @@
       saveState();
       e.target.reset();
       renderJogadores();
+      renderPresencaCheckboxes();
     });
 
     function renderJogadores() {
@@ -789,12 +996,13 @@
           const id = b.dataset.id;
           const act = b.dataset.act;
           if (act === "del") {
-            if (!confirm("Excluir este jogador e pagamentos vinculados a ele?")) return;
+            if (!confirm("Excluir este jogador e pagamentos vinculados a ele? (Isso não altera o histórico salvo na aba Presenças)")) return;
             state.players = state.players.filter((x) => x.id !== id);
             state.monthlyPayments = state.monthlyPayments.filter((x) => x.playerId !== id);
             state.avulsoPayments = state.avulsoPayments.filter((x) => x.playerId !== id);
             saveState();
             renderJogadores();
+            renderPresencaCheckboxes();
             renderFluxo();
             return;
           }
